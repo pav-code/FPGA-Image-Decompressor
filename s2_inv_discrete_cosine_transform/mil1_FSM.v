@@ -1,0 +1,1331 @@
+/*
+Copyright by Henry Ko and Nicola Nicolici
+Developed for the Digital Systems Design course (COE3DQ4)
+Department of Electrical and Computer Engineering
+McMaster University
+Ontario, Canada
+*/
+
+`timescale 1ns/100ps
+`default_nettype none
+
+`include "define_state.h"
+
+// This is the top module
+// It connects the UART, SRAM and VGA together.
+// It gives access to the SRAM for UART and VGA
+module mil1_FSM (
+		/////// board clocks                      ////////////
+		input logic CLOCK_50_I,                   // 50 MHz clock
+		
+		input logic start,//start attempt
+		
+		output logic finish,
+		
+		
+		input logic Resetn,
+		input logic[3:0] PB_pushed,
+		
+		//sram
+		output logic   [17:0]   SRAM_address,
+		input  logic   [15:0]   SRAM_read_data,
+		output logic            SRAM_we_n,
+		output logic   [15:0]   SRAM_write_data,
+		
+		//multipliers
+		input logic signed [63:0] a,
+		input logic signed [63:0] b,
+		input logic signed [63:0] c,
+		input logic signed [63:0] d,
+
+		output logic signed [31:0] op1,
+		output logic signed [31:0] op2,
+		output logic signed [31:0] op3,
+		output logic signed [31:0] op4,		
+		
+		output logic signed [31:0] op5,
+		output logic signed [31:0] op6,
+		output logic signed [31:0] op7,
+		output logic signed [31:0] op8
+		
+
+);
+	
+// Define the offset for Green and Blue data in the memory		
+parameter  Y_OFFSET = 18'd0,
+		   U_EVEN_OFFSET = 18'd38400,
+	       V_EVEN_OFFSET = 18'd57600,
+	       RGB_OFFSET = 18'd146944;
+	
+logic resetn;
+
+FSM_state_type m1_state;
+//// TEST LOGIC VARIBLES //////////
+logic [17:0] test_reg;
+/////// FSM VARIABLES ////////////////////////////////////////////
+//logic start;
+logic[17:0] Y_data_count, write_count, data_count,End_row_count;
+logic signed [2:0] csc_even_val_select;
+logic [1:0] csc_odd_val_select;
+logic end_row_flag;
+logic [7:0] U_saved_for_Row;
+logic [7:0] V_saved_for_Row;
+
+
+logic [15:0] Y;
+// upSamp 'U
+// UpSamp 'V
+
+logic signed [31:0] ACC_U;
+logic [7:0] Reg_u;
+logic [7:0] Reg_u2;
+
+logic [7:0] U_j5;
+logic [7:0] U_j3;
+logic [7:0] U_j1;
+logic [7:0] U_jP1;
+logic [7:0] U_jP3;
+logic [7:0] U_jP5;
+
+logic signed [31:0] ACC_V;
+logic [7:0] Reg_v;
+logic [7:0] Reg_v2;
+
+logic [7:0] V_j5;
+logic [7:0] V_j3;
+logic [7:0] V_j1;
+logic [7:0] V_jP1;
+logic [7:0] V_jP3;
+logic [7:0] V_jP5;
+
+
+//Reg_y_even
+logic [7:0] CSC_even_Y;
+logic[15:0] CSC_even_U;
+logic[15:0] CSC_even_V;
+
+logic signed [31:0] R_even;
+logic signed [31:0] G_even;
+logic signed [31:0] B_even;
+
+logic signed [31:0] output_csc_even_R;
+logic signed [31:0] output_csc_even_G;
+logic signed [31:0] output_csc_even_B;
+
+
+//Reg_y_odd
+logic[15:0] CSC_odd_Y;
+logic[15:0] CSC_odd_U;
+logic[15:0] CSC_odd_V;
+
+logic[31:0] R_odd;
+logic[31:0] G_odd;
+logic[31:0] B_odd;
+
+logic [31:0] output_csc_odd_R;
+logic [31:0] output_csc_odd_G;
+logic [31:0] output_csc_odd_B;
+
+/// declarations on above combinational blocks at the bottom
+logic [1:0] const_select;
+logic signed [31:0] U_output, V_output;
+
+
+logic[2:0] csc_const_select;
+logic [31:0] output_csc_even,output_csc_odd;
+
+///////////////////////////////////////////////////////////////////////////////
+
+
+//assign resetn = ~SWITCH_I[17];
+
+//some startbit for our FSM (interpol/CSC starter)
+//assign start=1'b1;
+
+always_ff @ (posedge CLOCK_50_I or negedge Resetn) begin
+	if(Resetn == 1'b0)begin
+			finish <= 1'b0;//
+			m1_state <= S_FSM_IDLE;
+	end else begin
+		
+		case (m1_state)
+		S_FSM_IDLE: begin
+		  
+			if(start)begin
+			// START THE DECODER FSM
+				SRAM_we_n <= 1'b1;
+				finish <= 1'b0;
+				write_count <= 18'd0;
+				data_count <= 18'd0;
+				Y_data_count <= 18'd0;
+				End_row_count <=  18'd0;
+				end_row_flag <= 1'b0;
+				m1_state <= S_LOAD_READ;
+			end
+		end
+		
+		S_LOAD_READ:begin
+		  //$write("I SHOULD ONLY SEE THIS ONCE");
+			//our first state in the FSM - SRAM_we_n is now settled to a 1
+			SRAM_address <= U_EVEN_OFFSET + data_count;
+			SRAM_we_n <= 1'b1;
+			
+			m1_state <= S_INTI_FSM;
+		end
+		
+		S_INTI_FSM:begin
+			//retrieve u2 u3
+			SRAM_address <= U_EVEN_OFFSET + 18'd1+ data_count;
+			SRAM_we_n <= 1'b1;
+			m1_state <= S_INTI_FSM_1;			
+		end
+
+		S_INTI_FSM_1:begin
+			SRAM_address <= V_EVEN_OFFSET+ data_count;//v0 v1
+			SRAM_we_n <= 1'b1;
+			m1_state <= S_INTI_INT_U;
+		end
+
+		S_INTI_INT_U:begin
+		  
+			SRAM_address <= V_EVEN_OFFSET + 18'd1+ data_count; //v2 v3
+
+			U_j5 <= SRAM_read_data[15:8];//u0
+			U_j3 <= SRAM_read_data[15:8];
+			U_j1 <= SRAM_read_data[15:8];
+			U_jP1 <= SRAM_read_data[7:0];//u1
+
+			CSC_even_U <= SRAM_read_data;//u0 u1
+
+			m1_state <= S_INTI_INT_U_1;
+		end
+
+		S_INTI_INT_U_1:begin
+			SRAM_address <= U_EVEN_OFFSET + 18'd2+ data_count; //u4 u5
+			
+			U_jP3 <= SRAM_read_data[15:8]; //u2
+			U_jP5 <= SRAM_read_data[7:0]; //u3 most sign locations
+			
+			m1_state <= S_INTI_INT_V;
+		end
+		
+		S_INTI_INT_V:begin
+			SRAM_address <= V_EVEN_OFFSET + 18'd2+ data_count; //v4 v5 u5			
+
+			V_j5 <= SRAM_read_data[15:8];//v0
+			V_j3 <= SRAM_read_data[15:8];
+			V_j1 <= SRAM_read_data[15:8];
+			V_jP1 <= SRAM_read_data[7:0];//v1
+
+			CSC_even_V <= SRAM_read_data;//v0 v1
+
+
+			m1_state <= S_INTI_INT_V_1;
+		end
+		
+		S_INTI_INT_V_1:begin
+			SRAM_address <= Y_OFFSET+Y_data_count; //y0 y1
+			//Y_data_count <= Y_data_count + 18'd1;
+
+			V_jP3 <= SRAM_read_data[15:8];//v2
+			V_jP5 <= SRAM_read_data[7:0];//v3
+			
+			m1_state <= S_INTI_INTERPOLATION;			
+		end
+		
+		S_INTI_INTERPOLATION:begin
+			//interpolation begins with adding 128
+			ACC_U <= 18'd128;
+			ACC_V <= 18'd128;
+
+			//U4 U5 have arrived
+			Reg_u <= SRAM_read_data[15:8];//u4
+			Reg_u2 <= SRAM_read_data[7:0];//u5
+
+			//set up u_const_select,V_const_select 
+			// 21 for next c.c.
+			const_select <= 2'b00;
+			
+			m1_state <= S_INTI_INTERPOLATION_1;
+		end
+
+		S_INTI_INTERPOLATION_1:begin
+		  
+			//V4 V5 have arrived
+			Reg_v <= SRAM_read_data[15:8];//v4
+			Reg_v2 <= SRAM_read_data[7:0];//v5
+
+			//set up u_const_select,V_const_select 
+			// 52 for next c.c.
+			const_select <= 2'b01;			
+
+			//u BRANCH
+			U_j5 <= U_j3;//U0
+			U_j3 <= U_j1;//U0
+			U_j1 <= U_jP1;//U1
+			U_jP1 <= U_jP3;//U2
+			U_jP3 <= U_jP5;//U3
+			U_jP5 <= Reg_u; //U4
+			ACC_U <= U_output;// ACC_U + 21*U_j5; //acc+u0
+
+			//v BRANCH
+			V_j5 <= V_j3;//V0
+			V_j3 <= V_j1;//V0
+			V_j1 <= V_jP1;//V1
+			V_jP1 <= V_jP3;//V2
+			V_jP3 <= V_jP5;//V3
+			V_jP5 <= SRAM_read_data[15:8]; //V4
+			ACC_V <= V_output;//ACC_V + 21*V_j5; //acc+V0
+			
+			m1_state <= S_INTI_INTERPOLATION_2;	
+		end
+
+		S_INTI_INTERPOLATION_2: begin
+			//set up u_const_select,V_const_select 
+			// 159 for next c.c
+			const_select <= 2'b10;	
+			
+			//u BRANCH
+			U_j5 <= U_j3;//U0
+			U_j3 <= U_j1;//U0
+			U_j1 <= U_jP1;//U1
+			U_jP1 <= U_jP3;//U2
+			U_jP3 <= U_jP5;//U3
+			U_jP5 <= U_j5; //U4
+			ACC_U <= U_output;// ACC_U - 52*U_j5; //acc+u0
+
+			//v BRANCH
+			V_j5 <= V_j3;//V0
+			V_j3 <= V_j1;//V0
+			V_j1 <= V_jP1;//V1
+			V_jP1 <= V_jP3;//V2
+			V_jP3 <= V_jP5;//V3
+			V_jP5 <= V_j5; //V4
+			ACC_V <= V_output;// ACC_V + V_j5; //acc+V0
+
+			CSC_even_Y <= SRAM_read_data[15:8];
+			CSC_odd_Y <= SRAM_read_data[7:0];
+			
+			m1_state <= S_INTI_INTERPOLATION_3;
+		end
+
+		S_INTI_INTERPOLATION_3: begin
+			//set up u_const_select,V_const_select 
+			// 159 for next c.c
+			const_select <= 2'b10;
+
+			//u BRANCH
+			U_j5 <= U_j3;//U0
+			U_j3 <= U_j1;//U1
+			U_j1 <= U_jP1;//U2
+			U_jP1 <= U_jP3;//U3
+			U_jP3 <= U_jP5;//U4
+			U_jP5 <= U_j5; //U0
+			ACC_U <= U_output;// ACC_U + 159*U_j5; //acc+u0
+
+			//v BRANCH
+			V_j5 <= V_j3;//V0
+			V_j3 <= V_j1;//V0
+			V_j1 <= V_jP1;//V1
+			V_jP1 <= V_jP3;//V2
+			V_jP3 <= V_jP5;//V3
+			V_jP5 <= V_j5; //V4
+			ACC_V <= V_output;// ACC_V + V_j5; //acc+V0
+			
+			m1_state <= S_INTI_INTERPOLATION_4;
+		end
+
+		S_INTI_INTERPOLATION_4:begin
+			//set up u_const_select,V_const_select 
+			// 52 for next c.c
+			const_select <= 2'b01;
+
+			//u BRANCH
+			U_j5 <= U_j3;//U1
+			U_j3 <= U_j1;//U2
+			U_j1 <= U_jP1;//U3
+			U_jP1 <= U_jP3;//U4
+			U_jP3 <= U_jP5;//U0
+			U_jP5 <= U_j5; //U0
+			ACC_U <= U_output;// ACC_U + 159*U_j5; //acc+u0
+
+			//v BRANCH
+			V_j5 <= V_j3;//V0
+			V_j3 <= V_j1;//V0
+			V_j1 <= V_jP1;//V1
+			V_jP1 <= V_jP3;//V2
+			V_jP3 <= V_jP5;//V3
+			V_jP5 <= V_j5; //V4
+			ACC_V <= V_output;//ACC_V - 59*V_j5; //acc+V0
+			
+			m1_state <= S_INTI_INTERPOLATION_5;
+		end
+
+		S_INTI_INTERPOLATION_5:begin
+			//set up u_const_select,V_const_select 
+			// 21 for next c.c
+			const_select <= 2'b00;
+
+			//u BRANCH
+			U_j5 <= U_j3;//U2
+			U_j3 <= U_j1;//U3
+			U_j1 <= U_jP1;//U4
+			U_jP1 <= U_jP3;//U0
+			U_jP3 <= U_jP5;//U0
+			U_jP5 <= U_j5; //U1
+			ACC_U <= U_output;// ACC_U + 21*U_j5; //acc+u0
+
+			//v BRANCH
+			V_j5 <= V_j3;//V0
+			V_j3 <= V_j1;//V0
+			V_j1 <= V_jP1;//V1
+			V_jP1 <= V_jP3;//V2
+			V_jP3 <= V_jP5;//V3
+			V_jP5 <= V_j5; //V4
+			ACC_V <= V_output;//ACC_V + V_j5; //acc+V0
+			
+			m1_state <= S_INTI_INTERPOLATION_6;
+		end
+
+		S_INTI_INTERPOLATION_6:begin
+
+			//write_count <= 18'd0;
+			data_count <= data_count + 18'd3;
+			Y_data_count <= Y_data_count + 18'd1;
+			SRAM_we_n <= 1'b1;
+			csc_const_select <= 3'b000; //pick 76284
+			csc_even_val_select <= 3'b000; //pick even Y and -16 in comb
+			csc_odd_val_select <= 2'b00; //pick odd Y and -16 in comb
+			// const_select doest matter since we arent accumulating
+
+			//u BRANCH
+			U_j5 <= U_j3;//U3
+			U_j3 <= U_j1;//U4
+			U_j1 <= U_jP1;//U0
+			U_jP1 <= U_jP3;//U0
+			U_jP3 <= U_jP5;//U1
+			U_jP5 <= U_j5; //U2
+			ACC_U <= U_output; //acc+u0
+
+			//v BRANCH
+			V_j5 <= V_j3;//V0
+			V_j3 <= V_j1;//V0
+			V_j1 <= V_jP1;//V1
+			V_jP1 <= V_jP3;//V2
+			V_jP3 <= V_jP5;//V3
+			V_jP5 <= V_j5; //V4
+			ACC_V <=V_output;// ACC_V + V_j5; //acc+V0
+
+			R_even<=0;//reset values to 0 for new csc
+			G_even<=0;
+			B_even<=0;
+			
+			//CSC odd branch
+			R_odd <= 0;
+			G_odd <= 0;
+			B_odd <= 0;
+			
+			m1_state <= S_CYC_CSC_INT;
+		end
+		// first cycle state out of the 14...
+		S_CYC_CSC_INT:begin
+		// if the flag isnt set, if its set leave it to 159
+		if(end_row_flag == 1'b0)begin 
+	     V_saved_for_Row <= Reg_v2;
+	     U_saved_for_Row <= Reg_u2;
+	   end
+	 
+			SRAM_address <= U_EVEN_OFFSET + data_count;//u6 u7
+			SRAM_we_n <= 1'b1;
+			
+			//mux select lines:
+			csc_const_select <= 3'b100; //pick 104595
+			csc_even_val_select <= 3'b010; //pick V [15:8](minus 128 from it)
+			csc_odd_val_select <= 2'b10; //pick interpolated V do -128 in comb
+			const_select <= 2'b00;//pick 21
+			
+
+			//u BRANCH
+			U_j5 <= U_j3;//U4
+			U_j3 <= U_j1;//U0
+			U_j1 <= U_jP1;//U0
+			U_jP1 <= U_jP3;//U1
+			U_jP3 <= U_jP5;//U2
+			U_jP5 <= U_j5; //U3
+			ACC_U <= 18'd128; //128
+
+			//v BRANCH
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			V_jP5 <= V_j5; 
+			ACC_V <= 18'd128;
+
+			// the interpolated odd pixel thats used in the input of the 				// CSC
+			// divide ACC_U by 256 and subract 128
+			CSC_odd_U <= ACC_U >> 8; //- $signed(18'd128);
+			CSC_odd_V <= ACC_V >> 8;// - $signed(18'd128));
+
+			// CSC even branch
+			R_even <= output_csc_even_R;
+			G_even <= output_csc_even_G;
+			B_even <= output_csc_even_B;
+
+			//CSC odd branch
+			R_odd <= output_csc_odd_R;
+			G_odd <= output_csc_odd_G;
+			B_odd <= output_csc_odd_B;
+
+			m1_state <= S_CYC_CSC_INT_1;
+		end
+		
+		S_CYC_CSC_INT_1:begin		  
+			SRAM_address <= V_EVEN_OFFSET + data_count;//v6 v7
+			
+			//mux select lines:
+			csc_const_select <= 3'b010; //pick 25624
+			csc_even_val_select <= 3'b001; //pick U[15:8] (minus 128 from it)
+			csc_odd_val_select <= 2'b01; //pick interpolated U
+			const_select <= 2'b01;//pick 52
+
+			//u BRANCH -loading state
+			U_j5 <= U_j3;//U0
+			U_j3 <= U_j1;//U0
+			U_j1 <= U_jP1;//U1
+			U_jP1 <= U_jP3;//U2
+			U_jP3 <= U_jP5;//U3
+			// For end of row special cases
+			if(end_row_flag == 1'b1)begin
+			    U_jP5 <= U_saved_for_Row;
+			end else begin
+				U_jP5 <= Reg_u2; //U4
+			end
+			ACC_U <= U_output; //128 + 21*U_j5
+
+			//v BRANCH -loading state
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			if(end_row_flag == 1'b1)begin
+				V_jP5 <= V_saved_for_Row; 
+			end else begin
+				V_jP5 <= Reg_v2; 
+			end
+			ACC_V <= V_output;
+
+			// CSC even branch
+			// final point of R_even 
+			// we should check if its negative so it can be assigned to 0
+			// we should also check if its too big to clip to max #
+			// if neither we divide by 65536
+			if((output_csc_even_R[31]) == 1'b1)begin
+			   R_even <= 32'd0;
+			end else if((output_csc_even_R[30:8]>>16) >= 1'b1)begin
+			   R_even <= {24'h000000,8'd255};
+			end else begin
+			   R_even <= (output_csc_even_R>>16);
+		  end
+
+			//CSC odd branch
+			if(output_csc_odd_R[31] == 1'b1)begin
+			   R_odd <= 32'd0;
+			end else if((output_csc_odd_R[30:8]>>16) >= 1'b1)begin
+			   R_odd <= {24'h000000,8'd255};
+			end else begin
+			   R_odd <= (output_csc_odd_R>>16);
+			end
+
+			m1_state <= S_CYC_CSC_INT_2;
+		end
+
+		S_CYC_CSC_INT_2:begin
+		  
+			SRAM_address <= Y_OFFSET + Y_data_count;//y2 y3
+			Y_data_count <= Y_data_count + 18'd1;
+			
+			//mux select lines:
+			csc_const_select <= 3'b011; //pick 53281
+			csc_even_val_select <= 3'b010; //pick V (minus 128 from it)
+			csc_odd_val_select <= 2'b10; //pick interpolated V
+			const_select <= 2'b10;//pick 159
+
+			//u BRANCH
+			U_j5 <= U_j3;//U0
+			U_j3 <= U_j1;//U1
+			U_j1 <= U_jP1;//U2
+			U_jP1 <= U_jP3;//U3
+			U_jP3 <= U_jP5;//U4
+			U_jP5 <= U_j5; //U5
+			ACC_U <= U_output; //128+U_j5*21 - U_j5*52
+
+			//v BRANCH
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			V_jP5 <= V_j5; 
+			ACC_V <= V_output;
+
+			// CSC even branch
+			G_even <= output_csc_even_G;
+
+			//CSC odd branch
+			//R_odd <= output_csc_odd_R;
+			G_odd <= output_csc_odd_G;
+			//B_odd <= output_csc_odd_B;
+			
+			
+
+			m1_state <= S_CYC_CSC_INT_3;
+		end
+
+		S_CYC_CSC_INT_3:begin
+		  //$write("G_odd : %d\n",G_odd);
+      
+			//mux select lines:
+			//SRAM_we_n <= 1'b0; //set the write enable row for next cc
+			
+			
+			//where we input the address and RGB values
+			csc_const_select <= 3'b001; //pick 132251
+			csc_even_val_select <= 3'b001; //pick U (minus 128 from it)
+			csc_odd_val_select <= 2'b01; //pick interpolated U
+			const_select <= 2'b10;//pick 159
+
+			//the new Even U values have arrived 
+			//(for interpolation)
+			Reg_u <= SRAM_read_data[15:8];
+			Reg_u2 <= SRAM_read_data[7:0];
+		
+			//u BRANCH
+			U_j5 <= U_j3;//U1
+			U_j3 <= U_j1;//U2
+			U_j1 <= U_jP1;//U3
+			U_jP1 <= U_jP3;//U4
+			U_jP3 <= U_jP5;//U5
+			U_jP5 <= U_j5; //U0
+			ACC_U <= U_output; //128+U_j5*21-U_j5*52 + 159*U_j5
+
+			//v BRANCH
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			V_jP5 <= V_j5; 
+			ACC_V <= V_output;
+
+			// CSC even branch
+			// Final point of output of G_even, if is negative we need to set it to 0...
+			if((output_csc_even_G[31]) == 1'b1)begin
+			   G_even <= 32'd0;
+			end else if((output_csc_even_G[30:8] >> 16) >= 1'b1)begin
+			   G_even <= {24'h000000,8'd255};
+			end else begin
+			   G_even <= (output_csc_even_G >> 16);
+		  end	
+
+			//CSC odd branch
+			if((output_csc_odd_G[31]) == 1'b1)begin
+			  G_odd <= 32'd0;
+			end else if((output_csc_odd_G[30:8] >> 16) >= 1'b1)begin
+			  G_odd <= {24'h000000,8'd255};
+			end else begin
+			   G_odd <= (output_csc_odd_G >> 16);
+			end
+			
+
+			m1_state <= S_CYC_CSC_INT_4;
+		end
+		
+		S_CYC_CSC_INT_4:begin
+// $write("G_odd : %d\n",G_odd>>16);
+//$write("R_even in state : %d\n",R_even);
+///////////////////////////$write("G_even in state : %d\n",G_even>>16);
+//$write("G_odd in state : %d\n",G_odd>>16);
+		  
+			//first write cycle:
+			//DATA IS divided by 65536, after matrix multiplication
+			//right before data output
+			write_count <= write_count + 18'd1;
+			SRAM_address <= RGB_OFFSET + write_count;
+			SRAM_we_n <= 1'b0;
+			SRAM_write_data[15:8] <= (R_even[7:0]);
+			SRAM_write_data[7:0] <= (G_even[7:0]);
+			
+
+			//mux select lines:
+			//csc_const_select we arent going to use next c.c.
+			//csc_even_val_select we arent going to use next c.c.
+			//csc_odd_val_select we arent going to use next c.c.
+			const_select <= 2'b01;//pick 52
+
+			//the new Even V values have arrived 
+			//(for interpolation)
+			Reg_v <= SRAM_read_data[15:8];
+			Reg_v2 <= SRAM_read_data[7:0];
+
+			//u BRANCH
+			U_j5 <= U_j3;//U2
+			U_j3 <= U_j1;//U3
+			U_j1 <= U_jP1;//U4
+			U_jP1 <= U_jP3;//U5
+			U_jP3 <= U_jP5;//U0
+			U_jP5 <= U_j5; //U1
+			ACC_U <= U_output; //128+U_j5*21-U_j5*52+U_j5*159+U_j5*159
+
+			//v BRANCH
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			V_jP5 <= V_j5; 
+			ACC_V <= V_output;
+			
+			// CSC even branch
+		  if((output_csc_even_B[31]) == 1'b1)begin
+			   B_even <= 32'd0;
+			end else if((output_csc_even_B[30:8] >> 16) >= 1'b1)begin
+			   B_even <= {24'h000000,8'd255};
+			end else begin
+			   B_even <= (output_csc_even_B >> 16);
+		  end	
+
+			//CSC odd branch 
+			//last point of blue to be assigned 0
+			if((output_csc_odd_B[31]) == 1'b1)begin
+			    B_odd <= 32'd0;
+			end else if((output_csc_odd_B[30:8] >> 16) >= 1'b1)begin
+			    B_odd <= {24'h000000,8'd255};
+			end else begin
+			    B_odd <= (output_csc_odd_B >> 16);
+			end
+			
+
+			m1_state <= S_CYC_CSC_INT_5;
+		end
+		
+		S_CYC_CSC_INT_5:begin
+	//	  $write("B_odd final: %d\n",B_odd);
+    //  $stop;		  
+//$write("SRAM_address : %d\n",SRAM_address);
+//$write("SRAM_write_data red_even?: %d\n",SRAM_write_data[15:8]);
+//$write("SRAM_write_data G_even?: %d\n",SRAM_write_data[7:0]);
+//$write("Write enable: %b\n",SRAM_we_n);
+////////////////////////$write("B_even : %d\n",B_even>>16);
+//$write("B_odd : %d\n",B_odd>>16);
+		  
+			write_count <= write_count + 18'd1;
+			SRAM_address <= RGB_OFFSET + write_count;
+			//SRAM_we_n <= 1'b0;
+			SRAM_write_data[15:8] <= (B_even[7:0]);
+			SRAM_write_data[7:0] <= (R_odd[7:0]);
+
+			//Y arrives
+			//for CSC
+			CSC_even_Y <= SRAM_read_data[15:8];
+			CSC_odd_Y <= SRAM_read_data[7:0];
+			
+
+			//mux select lines:
+			//csc_const_select we arent going to use next c.c.
+			//csc_even_val_select we arent going to use next c.c.
+			//csc_odd_val_select we arent going to use next c.c.
+			const_select <= 2'b00;//pick 21
+
+			//u BRANCH
+			U_j5 <= U_j3;//U3
+			U_j3 <= U_j1;//U4
+			U_j1 <= U_jP1;//U5
+			U_jP1 <= U_jP3;//U0
+			U_jP3 <= U_jP5;//U1
+			U_jP5 <= U_j5; //U2
+			ACC_U <= U_output; //128+U_j5*21-U_j5*52+U_j5*159+U_j5*159 - U_j5*52
+
+			//v BRANCH
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			V_jP5 <= V_j5; 
+			ACC_V <= V_output;
+
+			m1_state <= S_CYC_CSC_INT_6;
+		end
+
+		S_CYC_CSC_INT_6:begin
+		  //$write("SRAM_address : %d\n",SRAM_address);
+//$write("SRAM_write_data blue_even?: %d\n",SRAM_write_data[15:8]);
+//$write("SRAM_write_data r odd?: %d\n",SRAM_write_data[7:0]);
+		  //turn writing off and reading on
+			write_count <= write_count + 18'd1;
+			SRAM_address <= RGB_OFFSET + write_count;
+			SRAM_we_n <= 1'b0;
+			SRAM_write_data[15:8] <= (G_odd[7:0]);
+			SRAM_write_data[7:0] <= (B_odd[7:0]);
+			
+
+			csc_const_select <= 3'b000; //pick 76284
+			csc_even_val_select <= 3'b000; //pick even Y with -16 already
+			csc_odd_val_select <= 2'b00; //pick odd Y with -16 already
+			// const_select doest matter since we arent accumulating
+
+			//u BRANCH
+			U_j5 <= U_j3;//U3
+			U_j3 <= U_j1;//U4
+			U_j1 <= U_jP1;//U5
+			U_jP1 <= U_jP3;//U0
+			U_jP3 <= U_jP5;//U1
+			U_jP5 <= U_j5; //U2
+			ACC_U <= U_output; //128+U_j5*21-U_j5*52+U_j5*159+U_j5*159-U_j5*52 + 21*U_j5
+
+			//v BRANCH
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			V_jP5 <= V_j5; 
+			ACC_V <= V_output;
+
+			// CSC even branch
+			R_even <= 8'd0;
+			G_even <= 8'd0;
+			B_even <= 8'd0;
+
+			//CSC odd branch
+			R_odd <= 8'd0;
+			G_odd <= 8'd0;
+			B_odd <= 8'd0;
+
+			
+			m1_state <= S_CYC_TWO_CSC_INT;
+		end
+
+		S_CYC_TWO_CSC_INT:begin
+		  //Special End Of Row code
+			if (End_row_count == 18'd77)begin
+				end_row_flag <= 1'b1;
+			end
+      //$write("even Y = %d, odd Y= %d; U = %b, V = %b even in memory\n",CSC_even_Y,CSC_odd_Y,CSC_even_U,CSC_even_V);
+		  
+			//first state of cycle 2, 7/14...
+			SRAM_address <= Y_OFFSET + Y_data_count;
+			Y_data_count <= Y_data_count + 18'd1;
+			SRAM_we_n <= 1'b1;
+			
+			//mux select lines:
+			csc_const_select <= 3'b100; //pick 104595
+			csc_even_val_select <= 3'b100; //pick V[7:0] (minus 128 from it)
+			csc_odd_val_select <= 2'b10; //pick interpolated V with -128 already 
+			const_select <= 2'b00;//pick 21
+			
+
+			//u BRANCH
+			U_j5 <= U_j3;//U4
+			U_j3 <= U_j1;//U0
+			U_j1 <= U_jP1;//U0
+			U_jP1 <= U_jP3;//U1
+			U_jP3 <= U_jP5;//U2
+			U_jP5 <= U_j5; //U3
+			ACC_U <= 18'd128; //128
+
+			//v BRANCH
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			V_jP5 <= V_j5; 
+			ACC_V <= 18'd128;
+
+			// the interpolated odd pixel thats used in the input of the 				// CSC
+			CSC_odd_U <= (ACC_U >> 8);
+			CSC_odd_V <= (ACC_V >> 8);
+
+			// CSC even branch
+			R_even <= output_csc_even_R;
+			G_even <= output_csc_even_G;
+			B_even <= output_csc_even_B;
+
+			//CSC odd branch
+			R_odd <= output_csc_odd_R;
+			G_odd <= output_csc_odd_G;
+			B_odd <= output_csc_odd_B;
+
+			m1_state <= S_CYC_TWO_CSC_INT_1;
+
+		end
+
+		S_CYC_TWO_CSC_INT_1:begin
+			//retriving old non-buffered values for even CSC pixel output
+			SRAM_address <= U_EVEN_OFFSET + (data_count-18'd2);
+			
+			//mux select lines:
+			csc_const_select <= 3'b010; //pick 25624
+			csc_even_val_select <= 3'b011; //pick U[7:0] (minus 128 from it)
+			csc_odd_val_select <= 2'b01; //pick interpolated U
+			const_select <= 2'b01;//pick 52
+
+			//u BRANCH -loading state
+			U_j5 <= U_j3;//U0
+			U_j3 <= U_j1;//U0
+			U_j1 <= U_jP1;//U1
+			U_jP1 <= U_jP3;//U2
+			U_jP3 <= U_jP5;//U3
+			if(end_row_flag == 1'b1)begin
+			    U_jP5 <= U_saved_for_Row;
+			end else begin
+				U_jP5 <= Reg_u; //U4
+			end
+			ACC_U <= U_output; //128
+
+			//v BRANCH - loading state
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			if(end_row_flag == 1'b1)begin
+				V_jP5 <= V_saved_for_Row; 
+			end else begin
+				V_jP5 <= Reg_v; 
+			end
+			ACC_V <= V_output;
+
+			// CSC even branch
+			// final point of R_even 
+			// we should check if its negative so it can be assigned to 0
+			// we should also check if its too big to clip to max #
+			if((output_csc_even_R[31]) == 1'b1)begin
+			   R_even <= 32'd0;
+			end else if((output_csc_even_R[30:8] >> 16) >= 1'b1)begin
+			   R_even <= {24'h000000,8'd255};
+			end else begin
+			   R_even <= (output_csc_even_R >> 16);
+		  end			
+
+			//CSC odd branch
+			if(output_csc_odd_R[31] == 1'b1)begin
+			   R_odd <= 32'd0;
+			end else if((output_csc_odd_R[30:8]>>16) >= 1'b1)begin
+			   R_odd <= {24'h000000,8'd255};
+			end else begin
+			   R_odd <= (output_csc_odd_R>>16);
+			end
+
+			m1_state <= S_CYC_TWO_CSC_INT_2;
+		end
+		
+		S_CYC_TWO_CSC_INT_2:begin
+/////////////////$write("R_even : %d\n",R_even>>16);
+//$write("R_odd : %d\n",R_odd>>16);
+		  
+		  
+			//retriving old non-buffered values for even CSC pixel output
+			SRAM_address <= V_EVEN_OFFSET + (data_count - 18'd2);
+			
+			//mux select lines:
+			csc_const_select <= 3'b011; //pick 53281
+			csc_even_val_select <= 3'b100; //pick V (minus 128 from it)
+			csc_odd_val_select <= 2'b10; //pick interpolated V
+			const_select <= 2'b10;//pick 159
+
+			//u BRANCH
+			U_j5 <= U_j3;//U0
+			U_j3 <= U_j1;//U1
+			U_j1 <= U_jP1;//U2
+			U_jP1 <= U_jP3;//U3
+			U_jP3 <= U_jP5;//U4
+			U_jP5 <= U_j5; //U5
+			ACC_U <= U_output; //128+U_j5*21
+
+			//v BRANCH
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			V_jP5 <= V_j5; 
+			ACC_V <= V_output;
+
+			// CSC even branch
+			G_even <= output_csc_even_G;
+
+			//CSC odd branch
+			G_odd <= output_csc_odd_G;
+
+			m1_state <= S_CYC_TWO_CSC_INT_3;
+		end
+
+		S_CYC_TWO_CSC_INT_3:begin
+		  //set up for writing on next c.c.
+      //SRAM_we_n <= 1'b0;
+
+
+			//y arrives
+			CSC_even_Y <= SRAM_read_data[15:8];
+			CSC_odd_Y <= SRAM_read_data[7:0];
+
+			//mux select lines:
+			csc_const_select <= 3'b001; //pick 132251
+			csc_even_val_select <= 3'b011; //pick U (minus 128 from it)
+			csc_odd_val_select <= 2'b01; //pick interpolated U
+			const_select <= 2'b10;//pick 159
+
+			//u BRANCH
+			U_j5 <= U_j3;//U1
+			U_j3 <= U_j1;//U2
+			U_j1 <= U_jP1;//U3
+			U_jP1 <= U_jP3;//U4
+			U_jP3 <= U_jP5;//U5
+			U_jP5 <= U_j5; //U0
+			ACC_U <= U_output; //128+U_j5*21-U_j5*52
+
+			//v BRANCH
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			V_jP5 <= V_j5; 
+			ACC_V <= V_output;
+
+			// CSC even branch
+			if((output_csc_even_G[31]) == 1'b1)begin
+			   G_even <= 32'd0;
+			end else if((output_csc_even_G[30:8] >> 16) >= 1'b1)begin
+			   G_even <= {24'h000000,8'd255};
+			end else begin
+			   G_even <= (output_csc_even_G >> 16);
+		  end	
+
+			//CSC odd branch
+			if((output_csc_odd_G[31]) == 1'b1)begin
+			  G_odd <= 32'd0;
+			end else if((output_csc_odd_G[30:8]) >> 16 >= 1'b1)begin
+			  G_odd <= {24'h000000,8'd255};
+			end else begin
+			   G_odd <= (output_csc_odd_G >> 16);
+			end
+
+			m1_state <= S_CYC_TWO_CSC_INT_4;
+		end
+
+		S_CYC_TWO_CSC_INT_4:begin
+///////////////$write("G_even in state : %d\n",G_even>>16);
+//$write("G_odd in state : %d\n",G_odd>>16);
+		  
+			//first write cycle:
+			SRAM_address <= RGB_OFFSET + write_count;
+			write_count <= write_count + 18'd1;
+			SRAM_we_n <= 1'b0;
+			SRAM_write_data[15:8] <= (R_even[7:0]);
+			SRAM_write_data[7:0] <= (G_even[7:0]);
+			
+			//CSC even for U values arrive
+			CSC_even_U <= SRAM_read_data;
+
+			//mux select lines:
+			//csc_const_select we arent going to use next c.c.
+			//csc_even_val_select we arent going to use next c.c.
+			//csc_odd_val_select we arent going to use next c.c.
+			const_select <= 2'b01;//pick 52
+
+			//u BRANCH
+			U_j5 <= U_j3;//U2
+			U_j3 <= U_j1;//U3
+			U_j1 <= U_jP1;//U4
+			U_jP1 <= U_jP3;//U5
+			U_jP3 <= U_jP5;//U0
+			U_jP5 <= U_j5; //U1
+			ACC_U <= U_output; //128+U_j5*21-U_j5*52+U_j5*159
+
+			//v BRANCH
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			V_jP5 <= V_j5; 
+			ACC_V <= V_output;
+			
+			//CSC odd branch 
+			//last point of blue to be assigned 0
+			if((output_csc_even_B[31]) == 1'b1)begin
+			   B_even <= 32'd0;
+			end else if((output_csc_even_B[30:8] >> 16) >= 1'b1)begin
+			   B_even <= {24'h000000,8'd255};
+			end else begin
+			   B_even <= (output_csc_even_B >> 16);
+		  end	
+		  
+		  
+			if((output_csc_odd_B[31]) == 1'b1)begin
+			    B_odd <= 32'd0;
+			end else if((output_csc_odd_B[30:8] >> 16) >= 1'b1)begin
+			    B_odd <= {24'h000000,8'd255};
+			end else begin
+			    B_odd <= (output_csc_odd_B >> 16);
+			end
+			
+			
+			m1_state <= S_CYC_TWO_CSC_INT_5;
+		end
+
+		S_CYC_TWO_CSC_INT_5:begin
+///////////////////////////$write("B_even : %d\n",B_even>>16);
+//$write("B_odd : %d\n",B_odd>>16);
+		  
+			SRAM_address <= RGB_OFFSET + write_count;
+			write_count <= write_count + 18'd1;
+			SRAM_we_n <= 1'b0;
+			SRAM_write_data[15:8] <= (B_even[7:0]);
+			SRAM_write_data[7:0] <= (R_odd[7:0]);			
+
+			//CSC even for U values arrive
+			CSC_even_V <= SRAM_read_data;
+
+			//mux select lines:
+			//csc_const_select we arent going to use next c.c.
+			//csc_even_val_select we arent going to use next c.c.
+			//csc_odd_val_select we arent going to use next c.c.
+			const_select <= 2'b00;//pick 21
+
+			//u BRANCH
+			U_j5 <= U_j3;//U3
+			U_j3 <= U_j1;//U4
+			U_j1 <= U_jP1;//U5
+			U_jP1 <= U_jP3;//U0
+			U_jP3 <= U_jP5;//U1
+			U_jP5 <= U_j5; //U2
+			ACC_U <= U_output; //128+U_j5*21-U_j5*52+U_j5*159+U_j5*159
+
+			//v BRANCH
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			V_jP5 <= V_j5; 
+			ACC_V <= V_output;
+
+			m1_state <= S_CYC_TWO_CSC_INT_6;
+		end
+
+		S_CYC_TWO_CSC_INT_6:begin
+			SRAM_address <= RGB_OFFSET + write_count;
+			write_count <= write_count + 18'd1;
+			SRAM_we_n <= 1'b0;
+			SRAM_write_data[15:8] <= (G_odd[7:0]);
+			SRAM_write_data[7:0] <= (B_odd[7:0]);
+			
+
+			csc_const_select <= 3'b000; //pick 76284
+			csc_even_val_select <= 3'b000; //pick even Y with -16 already
+			csc_odd_val_select <= 2'b00; //pick odd Y with -16 already
+			// const_select doest matter since we arent accumulating
+
+			//u BRANCH
+			U_j5 <= U_j3;//U3
+			U_j3 <= U_j1;//U4
+			U_j1 <= U_jP1;//U5
+			U_jP1 <= U_jP3;//U0
+			U_jP3 <= U_jP5;//U1
+			U_jP5 <= U_j5; //U2
+			ACC_U <= U_output; //128+U_j5*21-U_j5*52+U_j5*159+U_j5*159-U_j5*52
+
+			//v BRANCH
+			V_j5 <= V_j3;
+			V_j3 <= V_j1;
+			V_j1 <= V_jP1;
+			V_jP1 <= V_jP3;
+			V_jP3 <= V_jP5;
+			V_jP5 <= V_j5; 
+			ACC_V <= V_output;
+
+			// CSC even branch
+			R_even <= 8'd0;
+			G_even <= 8'd0;
+			B_even <= 8'd0;
+
+			//CSC odd branch
+			R_odd <= 8'd0;
+			G_odd <= 8'd0;
+			B_odd <= 8'd0;
+
+			data_count <= data_count + 18'd1;
+			End_row_count <= End_row_count + 18'd1;
+/*
+				//Special End Of Row code
+			//Finished Lead out, Beging Lead in
+			if (End_row_count == 18'd79)begin
+				end_row_flag <= 1'b0;
+				End_row_count <= 18'd0;
+				data_count <= data_count - 18'd2;
+			end*/
+
+			//cycling condition
+			//if the memory of RGB is almost full (we finished the whole memory)
+			// RGB is ready for output...
+			// if not keep cycling 1/14
+			//$write("Write count: %d\n", write_count);
+			//$write("data count: %d\n", data_count);
+			if(write_count == 18'd115199)begin
+				m1_state <= S_FSM_IDLE;
+				finish <= 1'b1;
+				
+			end else begin
+			   //Special End Of Row code
+			   //Finished Lead out, Beging Lead in
+			   if (End_row_count == 18'd79)begin
+				    end_row_flag <= 1'b0;
+				    End_row_count <= 18'd0;
+				    data_count <= data_count - 18'd2;
+				    Y_data_count <= Y_data_count - 18'd1;
+				    m1_state <= S_LOAD_READ;
+			   end else begin
+                m1_state <= S_CYC_CSC_INT;
+            end
+				 
+			end
+		end
+		default: m1_state <= S_FSM_IDLE;
+		endcase
+	end
+end
+
+//MULTIPLIERS
+//u AND v constant selection mux
+always_comb begin
+	if (const_select == 2'b00)begin
+		op1 = 32'd21;
+		op3 = 32'd21;
+		op2 = U_j5;
+		op4 = V_j5;
+	
+	end else if (const_select == 2'b01)begin
+		op1 = 32'd52;
+		op3 = 32'd52;
+		op2 = U_j5;
+		op4 = V_j5;
+		
+	end else if (const_select == 2'b10)begin
+		op1 = 32'd159;
+		op3 = 32'd159;
+		op2 = U_j5;
+		op4 = V_j5;		
+		
+	end else begin
+		op1 = 32'd0;
+		op3 = 32'd0;
+		op2 = 32'd0;
+		op4 = 32'd0;
+	end
+end
+
+// CSC constant definitions under csc_const_select
+always_comb begin
+	if (csc_const_select == 3'b000)begin
+		op5 = 32'd76284;
+		op7 = 32'd76284;
+	end else if (csc_const_select == 3'b001)begin
+		op5 = 32'd132251;
+		op7 = 32'd132251;	
+	end else if (csc_const_select == 3'b010)begin
+		op5 = 32'd25624;
+		op7 = 32'd25624;
+	end else if (csc_const_select == 3'b011)begin
+		op5 = 32'd53281;
+		op7 = 32'd53281;
+	end else if (csc_const_select == 3'b100)begin
+		op5 = 32'd104595;
+		op7 = 32'd104595;
+	end else begin
+		op5 = 32'd0;
+		op7 = 32'd0;
+	end
+end
+
+// EVEN ->CSC selection between Y, U, or V
+always_comb begin
+	if (csc_even_val_select == 3'b000)begin
+		op6 = (CSC_even_Y-8'd16);
+	end else if (csc_even_val_select == 3'b001)begin
+		op6 = (CSC_even_U[15:8]-8'd128);
+	end else if (csc_even_val_select == 3'b010)begin
+		op6 = (CSC_even_V[15:8]-8'd128);
+	end else if (csc_even_val_select == 3'b011)begin
+		op6 = (CSC_even_U[7:0]-8'd128);
+	end else if (csc_even_val_select == 3'b100)begin
+		op6 = (CSC_even_V[7:0]-8'd128);
+	end else begin
+		op6 = 32'd0;
+	end
+end
+
+//general multiplier C
+//assign c = op5*op6;
+//MAC unit seperate values for multiplier outputs of even R G B
+assign output_csc_even_R = R_even + c;
+// constant select [1] gives negative for 25624 53821 in green
+assign output_csc_even_G = csc_const_select[1] ? (G_even - c):(G_even + c);
+assign output_csc_even_B = B_even + c;
+
+// ODD -> CSC selection between Y, U, or V
+always_comb begin
+	if (csc_odd_val_select == 2'b00)begin
+		op8 = CSC_odd_Y-8'd16;
+	end else if (csc_odd_val_select == 2'b01)begin
+		op8 = CSC_odd_U - 32'd128;
+	end else if (csc_odd_val_select == 2'b10)begin
+		op8 = CSC_odd_V - 32'd128;
+	end else begin
+		op8 = 32'd0;
+	end
+end
+
+//general multiplier D
+//assign d = op7*op8;
+//MAC unit seperate values for multiplier outputs of even R G B
+assign output_csc_odd_R = R_odd + d;
+assign output_csc_odd_G = csc_const_select[1] ? (G_odd - d):(G_odd + d);
+assign output_csc_odd_B = B_odd + d;
+
+//general multiplier A
+//assign a = op1*op2;
+//U adder/subtracter depending on: + for 21-00/159-10 (const_select[0]=0)
+// - for 52-01 (const_select[0] = 1)
+assign U_output = const_select[0] ? (ACC_U - a[31:0]) : (ACC_U + a[31:0]);
+
+
+//general multiplier B
+//assign b = op3*op4;
+//V multiplier
+assign V_output = const_select[0] ? (ACC_V - b[31:0]) : (ACC_V + b[31:0]);
+
+/*
+[23:21:34] Pavel     quartus is a piece of $%^& says:
+so u0 =116 
+u1=117
+u2=117
+u3=177
+u4 = 116
+[23:21:46] Boat says:
+yes
+[23:20:53] Pavel     quartus is a piece of $%^& says:
+u3 = 177??
+[23:20:58] Boat says:
+yes
+[23:21:04] Boat says:
+according to sram
+*/
+
+endmodule

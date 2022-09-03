@@ -1,0 +1,48 @@
+# Current time Tue Nov 22 20:07:05 2011
+# ModelSim Stack Trace
+# Program = vish
+# Id = "6.4a"
+# Version = "2008.08"
+# Date = "Oct 22 2008"
+# Platform = win32pe
+
+Exception c0000005 has occurred at address 005427e9. Traceback:
+# 0    0x005427e9: 'Mtirpc_Init + 0xe0399'
+# 1    0x0049ef8a: 'Mtirpc_Init + 0x3cb3a'
+# 2    0x0049e9f9: 'Mtirpc_Init + 0x3c5a9'
+# 3    0x00544109: 'Mtirpc_Init + 0xe1cb9'
+# 4    0x0054402d: 'Mtirpc_Init + 0xe1bdd'
+# 5    0x1000c74b: 'TclInvokeStringCommand + 0x6b'
+# 6    0x1000d52b: 'TclEvalObjvInternal + 0x24b'
+# 7    0x1002cad7: 'TclCompEvalObj + 0x637'
+# 8    0x1002c590: 'TclCompEvalObj + 0xf0'
+# 9    0x1000e159: 'Tcl_EvalObjEx + 0x59'
+# 10   0x014b9390: 'Itcl_EvalMemberCode + 0x210'
+# 11   0x02a296e8: '<unknown (@0x2a296e8)>'
+StackWalk failed 126
+# End of Stack Trace
+
+# Current time Wed Nov 23 18:12:08 2011
+# ModelSim Stack Trace
+# Program = vish
+# Id = "6.4a"
+# Version = "2008.08"
+# Date = "Oct 22 2008"
+# Platform = win32pe
+
+Exception c0000005 has occurred at address 005427e9. Traceback:
+# 0    0x005427e9: 'Mtirpc_Init + 0xe0399'
+# 1    0x0049ef8a: 'Mtirpc_Init + 0x3cb3a'
+# 2    0x0049e9f9: 'Mtirpc_Init + 0x3c5a9'
+# 3    0x00544109: 'Mtirpc_Init + 0xe1cb9'
+# 4    0x0054402d: 'Mtirpc_Init + 0xe1bdd'
+# 5    0x1000c74b: 'TclInvokeStringCommand + 0x6b'
+# 6    0x1000d52b: 'TclEvalObjvInternal + 0x24b'
+# 7    0x1002cad7: 'TclCompEvalObj + 0x637'
+# 8    0x1002c590: 'TclCompEvalObj + 0xf0'
+# 9    0x1000e159: 'Tcl_EvalObjEx + 0x59'
+# 10   0x014b9390: 'Itcl_EvalMemberCode + 0x210'
+# 11   0x02a29818: '<unknown (@0x2a29818)>'
+StackWalk failed 126
+# End of Stack Trace
+

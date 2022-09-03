@@ -1,0 +1,16 @@
+<?xml version="1.0" ?>
+<LOG_ROOT>
+	<PROJECT NAME="project">
+		<CBX_INST_ENTRY INSTANCE_NAME="|project|lpm_mult:Mult3" CBX_FILE_NAME="mult_o1t.tdf"/>
+		<CBX_INST_ENTRY INSTANCE_NAME="|project|mil1_FSM:mil1_unit|lpm_add_sub:Add35" CBX_FILE_NAME="add_sub_7ri.tdf"/>
+		<CBX_INST_ENTRY INSTANCE_NAME="|project|mil2_FSM:mil2_unit|dual_port_RAM1:dual_port_RAM_inst1|altsyncram:altsyncram_component" CBX_FILE_NAME="altsyncram_uq92.tdf"/>
+		<CBX_INST_ENTRY INSTANCE_NAME="|project|lpm_mult:Mult0" CBX_FILE_NAME="mult_m1t.tdf"/>
+		<CBX_INST_ENTRY INSTANCE_NAME="|project|lpm_mult:Mult2" CBX_FILE_NAME="mult_m1t.tdf"/>
+		<CBX_INST_ENTRY INSTANCE_NAME="|project|mil1_FSM:mil1_unit|lpm_add_sub:Add23" CBX_FILE_NAME="add_sub_7ri.tdf"/>
+		<CBX_INST_ENTRY INSTANCE_NAME="|project|mil1_FSM:mil1_unit|lpm_add_sub:Add30" CBX_FILE_NAME="add_sub_7ri.tdf"/>
+		<CBX_INST_ENTRY INSTANCE_NAME="|project|lpm_mult:Mult1" CBX_FILE_NAME="mult_m1t.tdf"/>
+		<CBX_INST_ENTRY INSTANCE_NAME="|project|mil1_FSM:mil1_unit|lpm_add_sub:Add33" CBX_FILE_NAME="add_sub_7ri.tdf"/>
+		<CBX_INST_ENTRY INSTANCE_NAME="|project|mil2_FSM:mil2_unit|dual_port_RAM0:dual_port_RAM_inst0|altsyncram:altsyncram_component" CBX_FILE_NAME="altsyncram_tq92.tdf"/>
+		<CBX_INST_ENTRY INSTANCE_NAME="|project|mil2_FSM:mil2_unit|dual_port_RAM2:dual_port_RAM_inst2|altsyncram:altsyncram_component" CBX_FILE_NAME="altsyncram_vq92.tdf"/>
+	</PROJECT>
+</LOG_ROOT>
