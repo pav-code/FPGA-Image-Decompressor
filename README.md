@@ -5,3 +5,5 @@ Hardware decompressor of an .mic5 -> .bmp uncompressed format. Language: SystemV
 + s2: The data is transformed using a inverse discrete cosine transform. .sram_d2 -> .sram_d1  
 + s3: The resulting YUV data is upsampled using horizontal interpolation on even colums to 
 odd columns of U and V. Each pixel is then transformed to RGB.  
+
+Project was done in order of s3, s2, s1 (incomplete - cannot find verilog files).
